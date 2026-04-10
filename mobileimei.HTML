@@ -95,12 +95,21 @@ body{margin:0;font-family:Arial;background:#f5f6fa}
   <div onclick="showTab('record')">记录</div>
 </div>
 
-<audio id="beep" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
+<audio id="beep" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
 
 <script>
 const API="https://script.google.com/macros/s/AKfycbwsja-XFAzFgbZdto_CbPvURKzddW6Xjrwv1FJ0slV7eNUyyTy4YdsyVaw7DsmMsvi_eQ/exec";
 let codeReader,videoStream,results=[];
 let allRecords=[];
+
+// 🔊 解决手机不响问题（必须用户触发后才能播放）
+function playBeep(){
+  const audio = document.getElementById('beep');
+  try{
+    audio.currentTime = 0;
+    audio.play().catch(()=>{});
+  }catch(e){}
+}
 
 function showTab(tab){
   document.getElementById('homePage').style.display=tab==='home'?'block':'none';
@@ -130,7 +139,7 @@ async function startScan(){
 
       imeis.forEach(v=>{
         if(!results.find(r=>r.value===v)){
-          document.getElementById('beep').play();
+          playBeep();
           results.push({value:v});
           renderResults();
           submitData(v);
