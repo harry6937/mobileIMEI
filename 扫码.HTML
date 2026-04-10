@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M2 Mobile</title>
+<script src="https://unpkg.com/@zxing/browser@latest"></script>
+
+<style>
+body{margin:0;font-family:Arial;background:#f5f6fa}
+.header{background:#4c6ef5;color:#fff;padding:15px;text-align:center}
+.container{padding:15px}
+.card{border-radius:15px;padding:20px;color:#fff;margin-bottom:15px;font-size:18px}
+.purple{background:linear-gradient(45deg,#c084fc,#9333ea)}
+
+#scannerModal{position:fixed;top:0;left:0;width:100%;height:100%;background:#000;display:none}
+#video{width:100%;height:100%;object-fit:cover}
+.scan-line{position:absolute;top:30%;left:10%;width:80%;height:2px;background:red;animation:move 2s infinite}
+@keyframes move{0%{top:30%}50%{top:70%}100%{top:30%}}
+
+#resultBox{position:absolute;bottom:0;width:100%;background:#fff;border-radius:20px 20px 0 0;padding:15px;max-height:40%;overflow:auto}
+.codeItem{display:flex;justify-content:space-between;padding:15px;border-bottom:1px solid #eee}
+.arrowBtn{background:#22c55e;color:#fff;border-radius:50%;width:40px;height:40px;display:flex;align-items:center;justify-content:center}
+.cancel{position:absolute;top:20px;left:15px;color:#fff}
+
+#detailPage,#recordPage{display:none;min-height:100vh;background:#f5f6f5;padding-bottom:80px}
+.detail-header{background:#4c6ef5;color:#fff;padding:15px;text-align:center;position:relative}
+.back{position:absolute;left:15px;top:15px}
+.card-box{background:#fff;margin:15px;border-radius:12px;overflow:hidden}
+.row{display:flex;justify-content:space-between;padding:15px;border-bottom:1px solid #eee}
+.big{font-size:28px;font-weight:bold}
+.btn{position:fixed;bottom:70px;width:90%;left:5%;padding:18px;background:#4c6ef5;color:#fff;border:none;border-radius:30px}
+
+.list-item{background:#fff;margin:10px;border-radius:10px;padding:15px}
+.time{font-size:12px;color:#888}
+
+.nav{position:fixed;bottom:0;width:100%;display:flex;background:#fff;border-top:1px solid #eee}
+.nav div{flex:1;text-align:center;padding:10px}
+</style>
+</head>
+
+<body>
+
+<div class="header">M2 Mobile</div>
+
+<div class="container" id="homePage">
+  <div class="card purple" onclick="openScan()">开始扫码</div>
+</div>
+
+<div id="scannerModal">
+  <div class="cancel" onclick="closeScan()">取消</div>
+  <video id="video"></video>
+  <div class="scan-line"></div>
+  <div id="resultBox"></div>
+</div>
+
+<div id="detailPage">
+  <div class="detail-header">
+    <span class="back" onclick="goHome()">←</span>
+    扫描详情
+  </div>
+
+  <div class="card-box">
+    <div class="row"><div>扫码时间</div><div id="detailTime"></div></div>
+    <div class="row"><div>类型</div><div>条形码</div></div>
+    <div style="padding:15px">
+      <div>扫码内容</div>
+      <div id="detailCode" class="big"></div>
+    </div>
+  </div>
+
+  <button class="btn" onclick="copyCode()">复制内容</button>
+</div>
+
+<div id="recordPage">
+  <div class="detail-header">扫码记录</div>
+
+  <div style="padding:10px">
+    <input id="searchInput" placeholder="搜索IMEI" style="width:100%;padding:10px;border-radius:10px;border:1px solid #ddd;margin-bottom:10px" oninput="filterRecords()">
+
+    <div style="display:flex;gap:10px;margin-bottom:10px">
+      <button onclick="clearRecords()" style="flex:1;padding:10px;background:#fca5a5;border:none;border-radius:10px">清空</button>
+      <button onclick="copyAll()" style="flex:1;padding:10px;background:#e5e7eb;border:none;border-radius:10px">复制</button>
+      <button onclick="exportCSV()" style="flex:1;padding:10px;background:#86efac;border:none;border-radius:10px">导出</button>
+    </div>
+
+    <div id="recordCount" style="margin-bottom:10px;color:#666"></div>
+  </div>
+
+  <div id="recordList"></div>
+</div>
+
+<div class="nav">
+  <div onclick="showTab('home')">首页</div>
+  <div onclick="showTab('record')">记录</div>
+</div>
+
+<audio id="beep" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
+
+<script>
+const API="https://script.google.com/macros/s/AKfycbwsja-XFAzFgbZdto_CbPvURKzddW6Xjrwv1FJ0slV7eNUyyTy4YdsyVaw7DsmMsvi_eQ/exec";
+let codeReader,videoStream,results=[];
+let allRecords=[];
+
+function showTab(tab){
+  document.getElementById('homePage').style.display=tab==='home'?'block':'none';
+  document.getElementById('recordPage').style.display=tab==='record'?'block':'none';
+  document.getElementById('detailPage').style.display='none';
+  if(tab==='record') loadRecords();
+}
+
+function openScan(){
+  document.getElementById('scannerModal').style.display='block';
+  startScan();
+}
+
+async function startScan(){
+  codeReader=new ZXingBrowser.BrowserMultiFormatReader();
+  results=[];
+
+  videoStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+  const video=document.getElementById('video');
+  video.srcObject=videoStream;
+  video.play();
+
+  codeReader.decodeFromVideoElement(video,(result)=>{
+    if(result){
+      const imeis=(result.text||"").match(/\d{15}/g);
+      if(!imeis)return;
+
+      imeis.forEach(v=>{
+        if(!results.find(r=>r.value===v)){
+          document.getElementById('beep').play();
+          results.push({value:v});
+          renderResults();
+          submitData(v);
+        }
+      });
+    }
+  });
+}
+
+function renderResults(){
+  const box=document.getElementById('resultBox');
+  box.innerHTML='<h3>选择IMEI</h3>';
+
+  results.forEach(item=>{
+    const div=document.createElement('div');
+    div.className='codeItem';
+    div.innerHTML=`<div>${item.value}</div><div class='arrowBtn'>→</div>`;
+    div.onclick=()=>showDetail(item.value);
+    box.appendChild(div);
+  });
+}
+
+function stopCamera(){
+  if(videoStream){videoStream.getTracks().forEach(t=>t.stop());videoStream=null;}
+}
+
+function closeScan(){
+  document.getElementById('scannerModal').style.display='none';
+  stopCamera();
+}
+
+function showDetail(code){
+  closeScan();
+  document.getElementById('homePage').style.display='none';
+  document.getElementById('detailPage').style.display='block';
+  document.getElementById('detailCode').innerText=code;
+  document.getElementById('detailTime').innerText=new Date().toLocaleString();
+}
+
+function goHome(){
+  document.getElementById('detailPage').style.display='none';
+  document.getElementById('homePage').style.display='block';
+}
+
+function copyCode(){
+  navigator.clipboard.writeText(document.getElementById('detailCode').innerText);
+  alert('已复制');
+}
+
+async function submitData(code){
+  try{
+    await fetch(API+"?code="+code);
+  }catch(e){console.error(e)}
+}
+
+function loadRecords(){
+  fetch(API)
+  .then(res=>res.json())
+  .then(data=>{
+    allRecords=data.reverse();
+    renderList(allRecords);
+  });
+}
+
+function renderList(data){
+  const box=document.getElementById('recordList');
+  const count=document.getElementById('recordCount');
+  box.innerHTML='';
+  count.innerText='共 '+data.length+' 条记录';
+
+  data.forEach((item,i)=>{
+    const div=document.createElement('div');
+    div.className='list-item';
+    div.innerHTML='<div>'+(i+1)+'. '+item.code+'</div><div class="time">'+item.time+'</div>';
+    box.appendChild(div);
+  });
+}
+
+function filterRecords(){
+  const k=document.getElementById('searchInput').value;
+  renderList(allRecords.filter(r=>r.code.includes(k)));
+}
+
+function copyAll(){
+  navigator.clipboard.writeText(allRecords.map(r=>r.code).join('\n'));
+  alert('已复制');
+}
+
+function exportCSV(){
+  let csv='IMEI,Time\n';
+  allRecords.forEach(r=>{csv+=r.code+','+r.time+'\n'});
+  const blob=new Blob([csv]);
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='record.csv';
+  a.click();
+}
+
+function clearRecords(){
+  allRecords=[];
+  renderList([]);
+}
+</script>
+
+</body>
+</html>
